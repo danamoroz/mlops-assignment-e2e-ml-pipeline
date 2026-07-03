@@ -6,6 +6,10 @@ __pycache__
 /trajectories/
 /trajectory.json
 
+/runs/
+/mlruns/
+mlflow.db
+
 /logs/
 docs/smoke-airflow-watch.log
 
