@@ -1,0 +1,46 @@
+{
+  "schema_version": "1",
+  "run_id": "20260703T213539Z-e90f8f",
+  "created_at": "2026-07-03T21:35:39.961537+00:00",
+  "status": "completed",
+  "config": "config.json",
+  "metrics": "metrics.json",
+  "artifacts": {
+    "local_run_dir": "runs/<run-id>",
+    "remote_uri": null,
+    "remote_archive_uri": null
+  },
+  "agent": {
+    "preds_json": "run-agent/preds.json",
+    "trajectories_dir": "run-agent/trajectories",
+    "instance_ids": ["astropy__astropy-12907"],
+    "trajectory_files": [
+      "run-agent/trajectories/astropy__astropy-12907/astropy__astropy-12907.traj.json"
+    ],
+    "log_files": ["run-agent/minisweagent.log"]
+  },
+  "eval": {
+    "logs_dir": "run-eval/logs",
+    "reports_dir": "run-eval/reports",
+    "aggregate_report": "run-eval/reports/nebius__moonshotai__Kimi-K2.6.<run-id>.json",
+    "per_instance_reports": [
+      "run-eval/logs/run_evaluation/<run-id>/nebius__moonshotai__Kimi-K2.6/astropy__astropy-12907/report.json"
+    ]
+  },
+  "provenance": {
+    "dag_id": "evaluate_agent",
+    "airflow_run_id": "<airflow-run-id>",
+    "model": "nebius/moonshotai/Kimi-K2.6",
+    "subset": "verified",
+    "split": "test",
+    "task_slice": "0:1"
+  },
+  "upload": {
+    "enabled": false,
+    "backend": "s3",
+    "bucket": "mlops-runs",
+    "prefix": "runs/<run-id>/",
+    "uploaded_at": null,
+    "notes": "Set ARTIFACT_UPLOAD=1 and start MinIO (or configure S3) to populate remote_uri."
+  }
+}

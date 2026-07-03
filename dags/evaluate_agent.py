@@ -1,10 +1,11 @@
-"""Airflow DAG: run mini-swe-agent batch, SWE-bench eval, MLflow logging."""
+"""Airflow DAG: run mini-swe-agent batch, SWE-bench eval, durable artifacts, MLflow."""
 
 from __future__ import annotations
 
 import json
 import os
 import subprocess
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,6 +14,17 @@ from airflow.decorators import dag, task
 from airflow.sdk import get_current_context
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from pipeline.run_durable import (  # noqa: E402
+    artifact_upload_enabled,
+    build_manifest,
+    finalize_run,
+    upload_run_artifacts,
+    write_manifest,
+)
+
 RUNS_ROOT = PROJECT_ROOT / "runs"
 
 DEFAULT_PARAMS = {
@@ -172,45 +184,7 @@ def run_swebench_eval(run_config: dict, preds_path: Path) -> Path:
     return eval_dir
 
 
-def _find_aggregate_report(eval_dir: Path) -> Path:
-    reports_dir = eval_dir / "reports"
-    search_dirs = [reports_dir, eval_dir] if reports_dir.is_dir() else [eval_dir]
-    for directory in search_dirs:
-        for path in sorted(directory.glob("*.json")):
-            if path.name == "metrics.json":
-                continue
-            try:
-                data = json.loads(path.read_text())
-            except json.JSONDecodeError:
-                continue
-            if "resolved_instances" in data:
-                return path
-    raise FileNotFoundError(
-        f"No SWE-bench aggregate report JSON found under {eval_dir}. "
-        f"Looked in {[str(d) for d in search_dirs]}."
-    )
-
-
-def collect_metrics(eval_dir: Path) -> dict:
-    eval_dir = Path(eval_dir)
-    report_path = _find_aggregate_report(eval_dir)
-    data = json.loads(report_path.read_text())
-
-    submitted = int(data.get("submitted_instances", 0))
-    resolved = int(data.get("resolved_instances", 0))
-    metrics = {
-        "submitted_instances": submitted,
-        "completed_instances": int(data.get("completed_instances", 0)),
-        "resolved_instances": resolved,
-        "unresolved_instances": int(data.get("unresolved_instances", 0)),
-        "error_instances": int(data.get("error_instances", 0)),
-        "resolved_rate": (resolved / submitted) if submitted else 0.0,
-        "aggregate_report": str(report_path),
-    }
-    return metrics
-
-
-def log_mlflow_run(run_config: dict, metrics_path: Path) -> None:
+def log_mlflow_run(run_config: dict, metrics_path: Path, manifest_path: Path) -> None:
     subprocess.run(
         [
             "uv",
@@ -221,6 +195,8 @@ def log_mlflow_run(run_config: dict, metrics_path: Path) -> None:
             str(Path(run_config["run_dir"]) / "config.json"),
             "--metrics",
             str(metrics_path),
+            "--manifest",
+            str(manifest_path),
         ],
         cwd=PROJECT_ROOT,
         env=get_task_env(),
@@ -234,7 +210,7 @@ def log_mlflow_run(run_config: dict, metrics_path: Path) -> None:
     schedule=None,
     catchup=False,
     params=DEFAULT_PARAMS,
-    tags=["swe-bench", "phase-1"],
+    tags=["swe-bench", "phase-2"],
 )
 def evaluate_agent_dag():
     @task(retries=0)
@@ -259,17 +235,46 @@ def evaluate_agent_dag():
         return str(eval_dir)
 
     @task(retries=0)
-    def summarize_and_log(run_config: dict, eval_dir: str) -> None:
-        eval_path = Path(eval_dir)
-        metrics = collect_metrics(eval_path)
-        metrics_path = Path(run_config["run_dir"]) / "metrics.json"
-        metrics_path.write_text(json.dumps(metrics, indent=2) + "\n")
-        log_mlflow_run(run_config, metrics_path)
+    def finalize_run_task(run_config: dict, eval_dir: str) -> dict:
+        context = get_current_context()
+        dag_run = context.get("dag_run")
+        airflow_run_id = str(dag_run.run_id) if dag_run else None
+        result = finalize_run(run_config, airflow_run_id=airflow_run_id)
+        return result
+
+    @task(retries=0)
+    def upload_artifacts(finalize_result: dict) -> dict:
+        env = get_task_env()
+        run_config = finalize_result["run_config"]
+        if not artifact_upload_enabled(env):
+            return {"enabled": False, "remote_uri": None, "remote_archive_uri": None, "uploaded_at": None}
+
+        upload_result = upload_run_artifacts(run_config)
+        metrics = json.loads(Path(finalize_result["metrics_path"]).read_text())
+        manifest = build_manifest(
+            run_config,
+            metrics,
+            upload_result=upload_result,
+            airflow_run_id=finalize_result.get("airflow_run_id"),
+        )
+        write_manifest(Path(run_config["run_dir"]), manifest)
+        return upload_result
+
+    @task(retries=0)
+    def summarize_and_log(finalize_result: dict, _upload_result: dict) -> None:
+        run_config = finalize_result["run_config"]
+        log_mlflow_run(
+            run_config,
+            Path(finalize_result["metrics_path"]),
+            Path(finalize_result["manifest_path"]),
+        )
 
     cfg = prepare_run()
     preds = run_agent(cfg)
     eval_out = run_eval(cfg, preds)
-    summarize_and_log(cfg, eval_out)
+    finalized = finalize_run_task(cfg, eval_out)
+    uploaded = upload_artifacts(finalized)
+    summarize_and_log(finalized, uploaded)
 
 
 evaluate_agent_dag()

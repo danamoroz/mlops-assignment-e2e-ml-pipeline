@@ -9,6 +9,7 @@ __pycache__
 /runs/
 /mlruns/
 mlflow.db
+*.tar.gz
 
 /logs/
 docs/smoke-airflow-watch.log
