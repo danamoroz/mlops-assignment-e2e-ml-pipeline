@@ -12,7 +12,7 @@ CONFIG_PATH="${CONFIG_PATH:?CONFIG_PATH required}"
 
 mkdir -p "$OUTPUT_DIR"
 
-MSWEA_COST_TRACKING='ignore_errors' uv run mini-extra swebench \
+MSWEA_COST_TRACKING='ignore_errors' mini-extra swebench \
   --subset "$SUBSET" \
   --split "$SPLIT" \
   --model "$MODEL" \

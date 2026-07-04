@@ -40,7 +40,7 @@ Sample outputs of `scripts/mini-swe-bench-batch.sh` and `scripts/swe-bench-eval.
 
 Your goal is to turn these ad-hoc scripts from `scripts/` into a proper, configurable Airflow pipeline that implements the basic  `run-agent -> run-evaluation` workflow: run `mini-swe-agent` on a subset of SWE-bench instances and evaluate the results.
 
-As a starting point with Airflow, you are provided with `run-airflow-standalone.sh` and a dag in `dags/` that re-implements `scripts/mini-swe-bench-single.sh`.
+As a starting point with Airflow, you are provided with `run-airflow-standalone.sh` and a dag in `dags/` that re-implements `scripts/mini-swe-bench-single.sh`. For the production-style Compose deployment, see **[docs/compose.md](docs/compose.md)**.
 
 **Airflow pipeline requirements**:
 - Configurable from Airflow parameters. Required params: `split`, `subset`, `workers`. Useful optional params: `model`, `task_slice`, `run_id`, and `cost_limit`. No hard-code for experiment values.
@@ -63,7 +63,7 @@ runs/
 
 **Deployment**
 1. Easy mode: run Airflow with `run-airflow-standalone.sh` and focus on making the DAG configurable and reproducible.
-2. Production-style mode: deploy Airflow and MLflow locally on the VM using `docker compose`: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#running-airflow-in-docker
+2. Production-style mode: deploy Airflow and MLflow with this repo’s Compose stack — see **[docs/compose.md](docs/compose.md)** (`docker-compose.yaml`, env vars, pipeline image build). The upstream Airflow Compose guide is [here](https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html) for reference only.
 3. MLflow should be reachable from the VM and used by the DAG to log parameters, metrics, and artifact references.
 
 Ultimately, the pipeline may look like: `run-mini-swe-agent` -> `swe-bench-eval` -> `log-artifacts-to-s3` -> `log-metrics-to-mlflow`.
@@ -124,7 +124,7 @@ runs/<run-id>/
 After the speedrun works, improve the engineering around it:
 
 - Replace direct subprocess calls with `DockerOperator` tasks that use the provided `Dockerfile`.
-- Run Airflow and MLflow through `docker-compose.yaml`.
+- Run Airflow and MLflow through `docker-compose.yaml` ([setup guide](docs/compose.md)).
 - Add sensible retries and timeouts around agent, evaluation, upload, and MLflow logging steps.
 - Keep inspecting the cloned mini-swe-agent and SWE-bench repositories only when you need to understand trajectory format, prediction format, or evaluation output.
 
@@ -263,6 +263,7 @@ This is the speedrun path: complete the existing scaffold, make the DAG configur
 | `Dockerfile` | Repeatable execution environment for agent and evaluation steps |
 | `DockerOperator` usage in the DAG | Isolated execution instead of local subprocess calls |
 | `docker-compose.yaml` | Docker Compose deployment for Airflow and MLflow on the VM |
+| [docs/compose.md](docs/compose.md) | Setup guide: build pipeline image, configure `.env`, start Compose, trigger the DAG |
 | `.env.example` | Non-secret environment template for Airflow, MLflow, Object Storage, and inference credentials |
 | S3/Object Storage upload | Long-term storage for full `runs/<run-id>/` artifacts |
 | `screenshots/airflow_dag.png` | Airflow UI showing the completed evaluation pipeline |
@@ -283,6 +284,6 @@ We care more about engineering judgment and traceability than about one lucky me
 | **Artifact structure and reproducibility** | 20% | Each run writes a structured `runs/<run-id>/` tree and includes enough inputs, outputs, trajectories, predictions, logs, and reports to reconstruct the run. Extra credit within this area for uploading artifacts to S3/Object Storage. |
 | **MLflow tracking** | 15% | Runs log parameters, metrics, run IDs, and artifact references so multiple evaluations can be compared in the MLflow UI. |
 | **Execution isolation** | 10% | Agent and evaluation work run in a documented, repeatable environment. `DockerOperator` with the project `Dockerfile` is the preferred production-style solution, but a clear standalone Airflow implementation without `DockerOperator` can still receive most of the credit if it is reproducible. |
-| **Docker Compose deployment** | 10% | Airflow and MLflow can run from `docker-compose.yaml` with documented setup and required environment variables. The Compose deployment should support the pipeline rather than become the main point of the assignment. |
+| **Docker Compose deployment** | 10% | Airflow and MLflow can run from `docker-compose.yaml` with documented setup and required environment variables ([docs/compose.md](docs/compose.md)). The Compose deployment should support the pipeline rather than become the main point of the assignment. |
 | **Report and reproducibility** | 10% | `REPORT.md` explains the architecture, how to trigger a run, where artifacts live, how to rerun by `run-id`, and what happened in at least one completed evaluation. |
 

@@ -29,9 +29,18 @@ runs/<run-id>/
 
 No MinIO or cloud credentials required.
 
-## Upload enabled (optional — MinIO on Docker)
+## Upload enabled (optional — MinIO)
 
-### 1. Start MinIO
+### Option A — Docker Compose (Phase 3, recommended)
+
+```bash
+# In .env: ARTIFACT_UPLOAD=1, S3_ENDPOINT_URL=http://minio:9000
+docker compose --profile upload up -d
+```
+
+See [compose.md](compose.md) for full stack setup.
+
+### Option B — Standalone MinIO container
 
 ```bash
 docker run -d --name minio \
@@ -93,6 +102,19 @@ Same code path:
 
 ## Manual upload of an existing run
 
+When `config.json` was written inside Compose, paths may point at `/opt/airflow/...`. On the host, patch them to the local `runs/<run-id>/` directory before upload (the helper below does this automatically).
+
+```bash
+cd /path/to/repo
+export ARTIFACT_UPLOAD=1
+# ... S3_* and AWS_* vars from .env.example ...
+
+uv run python scripts/backfill_object_storage_upload.py \
+  --run-id 20260704T004726Z-7ea9eb
+```
+
+Or inline:
+
 ```bash
 cd /path/to/repo
 export ARTIFACT_UPLOAD=1
@@ -100,12 +122,19 @@ export ARTIFACT_UPLOAD=1
 
 uv run python - <<'PY'
 import json
-import os
 from pathlib import Path
-from pipeline.run_durable import upload_run_artifacts, build_manifest, write_manifest, collect_metrics
+from pipeline.run_durable import upload_run_artifacts, build_manifest, write_manifest
 
-run_dir = Path("runs/<run-id>")
+repo = Path(".").resolve()
+run_id = "<run-id>"
+run_dir = repo / "runs" / run_id
 config = json.loads((run_dir / "config.json").read_text())
+config.update(
+    project_root=str(repo),
+    run_dir=str(run_dir),
+    agent_dir=str(run_dir / "run-agent"),
+    eval_dir=str(run_dir / "run-eval"),
+)
 result = upload_run_artifacts(config)
 metrics = json.loads((run_dir / "metrics.json").read_text())
 manifest = build_manifest(config, metrics, upload_result=result)

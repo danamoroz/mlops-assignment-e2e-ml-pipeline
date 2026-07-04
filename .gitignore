@@ -6,13 +6,19 @@ __pycache__
 /trajectories/
 /trajectory.json
 
-/runs/
+/runs/*
+!/runs/20260704T004726Z-7ea9eb/
+!/runs/20260704T004726Z-7ea9eb/**
+/runs/.cache/
 /mlruns/
 mlflow.db
 *.tar.gz
 
 /logs/
 docs/smoke-airflow-watch.log
+
+# Local planning / dev notes — not for submission
+.local/
 
 mini-swe-agent/
 SWE-bench/

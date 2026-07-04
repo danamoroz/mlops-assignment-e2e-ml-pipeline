@@ -17,7 +17,7 @@ fi
 
 cd "$OUTPUT_DIR"
 
-uv run python -m swebench.harness.run_evaluation \
+python -m swebench.harness.run_evaluation \
   --dataset_name "$DATASET_NAME" \
   --split "$SPLIT" \
   --predictions_path "$PREDICTIONS_PATH" \

@@ -1,0 +1,51 @@
+{
+  "schema_version": "1",
+  "run_id": "20260704T004726Z-7ea9eb",
+  "created_at": "2026-07-04T00:47:26.654780+00:00",
+  "status": "completed",
+  "config": "config.json",
+  "metrics": "metrics.json",
+  "artifacts": {
+    "local_run_dir": "/home/danar/repos/mlops-assignment-e2e-ml-pipeline/runs/20260704T004726Z-7ea9eb",
+    "remote_uri": "s3://mlops-runs/runs/20260704T004726Z-7ea9eb/",
+    "remote_archive_uri": null
+  },
+  "agent": {
+    "preds_json": "run-agent/preds.json",
+    "trajectories_dir": "run-agent/trajectories",
+    "instance_ids": [
+      "astropy__astropy-12907"
+    ],
+    "trajectory_files": [
+      "run-agent/trajectories/astropy__astropy-12907/astropy__astropy-12907.traj.json"
+    ],
+    "log_files": [
+      "run-agent/minisweagent.log",
+      "run-agent/exit_statuses_1783126418.6373374.yaml"
+    ]
+  },
+  "eval": {
+    "logs_dir": "run-eval/logs",
+    "reports_dir": "run-eval/reports",
+    "aggregate_report": "run-eval/reports/nebius__moonshotai__Kimi-K2.6.20260704T004726Z-7ea9eb.json",
+    "per_instance_reports": [
+      "run-eval/logs/run_evaluation/20260704T004726Z-7ea9eb/nebius__moonshotai__Kimi-K2.6/astropy__astropy-12907/report.json"
+    ]
+  },
+  "provenance": {
+    "dag_id": "evaluate_agent",
+    "airflow_run_id": "manual__2026-07-04T00:47:25.479293+00:00",
+    "model": "nebius/moonshotai/Kimi-K2.6",
+    "subset": "verified",
+    "split": "test",
+    "task_slice": "0:1"
+  },
+  "upload": {
+    "enabled": true,
+    "backend": "s3",
+    "bucket": "mlops-runs",
+    "prefix": "runs/20260704T004726Z-7ea9eb/",
+    "uploaded_at": "2026-07-04T01:38:15.559513+00:00",
+    "notes": "Uploaded to object storage."
+  }
+}

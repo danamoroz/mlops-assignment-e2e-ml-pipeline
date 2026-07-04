@@ -36,8 +36,13 @@ def normalize_run_layout(run_config: dict) -> None:
                 continue
             dest = trajectories_dir / entry.name
             if dest.exists():
+                shutil.rmtree(entry, ignore_errors=True)
                 continue
-            shutil.move(str(entry), str(dest))
+            try:
+                shutil.move(str(entry), str(dest))
+            except PermissionError:
+                shutil.copytree(entry, dest, dirs_exist_ok=True)
+                shutil.rmtree(entry, ignore_errors=True)
 
     reports_dir = eval_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)

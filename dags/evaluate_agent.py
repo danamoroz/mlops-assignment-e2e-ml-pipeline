@@ -17,6 +17,19 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from pipeline.docker_runtime import (  # noqa: E402
+    CONTAINER_SWEBENCH_CONFIG,
+    PipelineDockerOperator,
+    agent_container_environment,
+    build_pipeline_mounts,
+    container_agent_dir,
+    container_eval_dir,
+    container_preds_path,
+    eval_container_environment,
+    pipeline_image,
+    pipeline_container_user,
+    resolve_mini_swe_agent_root,
+)
 from pipeline.run_durable import (  # noqa: E402
     artifact_upload_enabled,
     build_manifest,
@@ -67,12 +80,10 @@ def get_task_env() -> dict[str, str]:
 
 
 def resolve_swebench_config_path() -> Path:
-    candidates = [
-        PROJECT_ROOT / "mini-swe-agent" / "src/minisweagent/config/benchmarks/swebench.yaml",
-        PROJECT_ROOT.parent / "mini-swe-agent" / "src/minisweagent/config/benchmarks/swebench.yaml",
-    ]
-    for path in candidates:
-        if path.exists():
+    msa_root = resolve_mini_swe_agent_root(PROJECT_ROOT)
+    if msa_root is not None:
+        path = msa_root / "src/minisweagent/config/benchmarks/swebench.yaml"
+        if path.is_file():
             return path
     raise FileNotFoundError(
         "mini-swe-agent swebench config not found. Clone mini-swe-agent as a sibling repo "
@@ -115,6 +126,10 @@ def build_run_config(params: dict) -> dict:
         "cost_limit": cost_limit,
         "dataset_name": dataset_name,
         "swebench_config": str(resolve_swebench_config_path()),
+        "container_agent_dir": container_agent_dir(run_id),
+        "container_eval_dir": container_eval_dir(run_id),
+        "container_preds_path": container_preds_path(run_id),
+        "container_swebench_config": CONTAINER_SWEBENCH_CONFIG,
     }
 
 
@@ -126,55 +141,16 @@ def prepare_run_dir(run_config: dict) -> Path:
     return run_dir
 
 
-def run_agent_batch(run_config: dict) -> Path:
-    env = get_task_env()
-    if not env.get("NEBIUS_API_KEY"):
-        raise RuntimeError(
-            "NEBIUS_API_KEY is not set. Add it to .env or export it before starting Airflow."
-        )
-
-    agent_dir = Path(run_config["agent_dir"])
-    subprocess.run(
-        ["bash", str(PROJECT_ROOT / "scripts/mini-swe-bench-batch.sh")],
-        cwd=PROJECT_ROOT,
-        env={
-            **env,
-            "SUBSET": run_config["subset"],
-            "SPLIT": run_config["split"],
-            "MODEL": run_config["model"],
-            "SLICE": run_config["task_slice"],
-            "WORKERS": str(run_config["workers"]),
-            "OUTPUT_DIR": str(agent_dir),
-            "CONFIG_PATH": run_config["swebench_config"],
-        },
-        check=True,
-    )
-
-    preds_path = agent_dir / "preds.json"
+def verify_agent_output(run_config: dict) -> Path:
+    preds_path = Path(run_config["agent_dir"]) / "preds.json"
     if not preds_path.is_file() or preds_path.stat().st_size == 0:
         raise FileNotFoundError(f"Agent did not produce preds.json at {preds_path}")
-
     json.loads(preds_path.read_text())
     return preds_path
 
 
-def run_swebench_eval(run_config: dict, preds_path: Path) -> Path:
+def verify_eval_output(run_config: dict) -> Path:
     eval_dir = Path(run_config["eval_dir"])
-    subprocess.run(
-        ["bash", str(PROJECT_ROOT / "scripts/swe-bench-eval.sh")],
-        cwd=PROJECT_ROOT,
-        env={
-            **get_task_env(),
-            "PREDICTIONS_PATH": str(preds_path),
-            "MAX_WORKERS": str(run_config["workers"]),
-            "EVAL_RUN_ID": run_config["run_id"],
-            "DATASET_NAME": run_config["dataset_name"],
-            "SPLIT": run_config["split"],
-            "OUTPUT_DIR": str(eval_dir),
-        },
-        check=True,
-    )
-
     logs_dir = eval_dir / "logs" / "run_evaluation"
     if not logs_dir.is_dir():
         raise FileNotFoundError(
@@ -185,23 +161,38 @@ def run_swebench_eval(run_config: dict, preds_path: Path) -> Path:
 
 
 def log_mlflow_run(run_config: dict, metrics_path: Path, manifest_path: Path) -> None:
-    subprocess.run(
-        [
-            "uv",
-            "run",
-            "python",
-            str(PROJECT_ROOT / "scripts/log_mlflow_run.py"),
-            "--config",
-            str(Path(run_config["run_dir"]) / "config.json"),
-            "--metrics",
-            str(metrics_path),
-            "--manifest",
-            str(manifest_path),
-        ],
-        cwd=PROJECT_ROOT,
-        env=get_task_env(),
-        check=True,
-    )
+    script = PROJECT_ROOT / "scripts/log_mlflow_run.py"
+    args = [
+        "--config",
+        str(Path(run_config["run_dir"]) / "config.json"),
+        "--metrics",
+        str(metrics_path),
+        "--manifest",
+        str(manifest_path),
+    ]
+    env = get_task_env()
+
+    if os.environ.get("AIRFLOW_HOME"):
+        cmd = [sys.executable, str(script), *args]
+    else:
+        cmd = ["uv", "run", "python", str(script), *args]
+
+    subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=True)
+
+
+def _docker_operator_kwargs() -> dict:
+    kwargs: dict = {
+        "image": pipeline_image(),
+        "docker_url": "unix://var/run/docker.sock",
+        "auto_remove": "success",
+        "mount_tmp_dir": False,
+        "mounts": build_pipeline_mounts(PROJECT_ROOT),
+        "working_dir": "/mlops-assignment",
+    }
+    user = pipeline_container_user()
+    if user:
+        kwargs["user"] = user
+    return kwargs
 
 
 @dag(
@@ -210,44 +201,69 @@ def log_mlflow_run(run_config: dict, metrics_path: Path, manifest_path: Path) ->
     schedule=None,
     catchup=False,
     params=DEFAULT_PARAMS,
-    tags=["swe-bench", "phase-2"],
+    tags=["swe-bench", "phase-3"],
 )
 def evaluate_agent_dag():
-    @task(retries=0)
+    @task(retries=0, execution_timeout=timedelta(minutes=5))
     def prepare_run() -> dict:
         context = get_current_context()
         params = dict(context["params"])
         conf = context["dag_run"].conf or {}
         if conf:
             params.update(conf)
+
+        if resolve_mini_swe_agent_root(PROJECT_ROOT) is None:
+            raise FileNotFoundError(
+                "mini-swe-agent repo not found. Clone it as a sibling of this repo "
+                "(see README prerequisites)."
+            )
+
+        env = get_task_env()
+        if not env.get("NEBIUS_API_KEY"):
+            raise RuntimeError(
+                "NEBIUS_API_KEY is not set. Add it to .env or export it before starting Airflow."
+            )
+
         run_config = build_run_config(params)
         prepare_run_dir(run_config)
         return run_config
 
-    @task(retries=0, execution_timeout=timedelta(hours=4))
-    def run_agent(run_config: dict) -> str:
-        preds_path = run_agent_batch(run_config)
+    @task(retries=0, execution_timeout=timedelta(minutes=10))
+    def verify_agent(run_config: dict) -> str:
+        preds_path = verify_agent_output(run_config)
         return str(preds_path)
 
-    @task(retries=0, execution_timeout=timedelta(hours=4))
-    def run_eval(run_config: dict, preds_path: str) -> str:
-        eval_dir = run_swebench_eval(run_config, Path(preds_path))
+    @task(retries=0, execution_timeout=timedelta(minutes=10))
+    def verify_eval(run_config: dict) -> str:
+        eval_dir = verify_eval_output(run_config)
         return str(eval_dir)
 
-    @task(retries=0)
+    @task(
+        retries=1,
+        retry_delay=timedelta(seconds=30),
+        execution_timeout=timedelta(minutes=10),
+    )
     def finalize_run_task(run_config: dict, eval_dir: str) -> dict:
         context = get_current_context()
         dag_run = context.get("dag_run")
         airflow_run_id = str(dag_run.run_id) if dag_run else None
-        result = finalize_run(run_config, airflow_run_id=airflow_run_id)
-        return result
+        return finalize_run(run_config, airflow_run_id=airflow_run_id)
 
-    @task(retries=0)
+    @task(
+        retries=3,
+        retry_delay=timedelta(minutes=1),
+        execution_timeout=timedelta(minutes=30),
+    )
     def upload_artifacts(finalize_result: dict) -> dict:
         env = get_task_env()
         run_config = finalize_result["run_config"]
         if not artifact_upload_enabled(env):
-            return {"enabled": False, "remote_uri": None, "remote_archive_uri": None, "uploaded_at": None}
+            return {
+                "enabled": False,
+                "remote_uri": None,
+                "remote_archive_uri": None,
+                "uploaded_at": None,
+            }
 
         upload_result = upload_run_artifacts(run_config)
         metrics = json.loads(Path(finalize_result["metrics_path"]).read_text())
@@ -260,7 +276,11 @@ def evaluate_agent_dag():
         write_manifest(Path(run_config["run_dir"]), manifest)
         return upload_result
 
-    @task(retries=0)
+    @task(
+        retries=2,
+        retry_delay=timedelta(seconds=30),
+        execution_timeout=timedelta(minutes=10),
+    )
     def summarize_and_log(finalize_result: dict, _upload_result: dict) -> None:
         run_config = finalize_result["run_config"]
         log_mlflow_run(
@@ -269,12 +289,36 @@ def evaluate_agent_dag():
             Path(finalize_result["manifest_path"]),
         )
 
+    docker_kwargs = _docker_operator_kwargs()
+
+    run_agent_docker = PipelineDockerOperator(
+        task_id="run_agent",
+        command=["bash", "scripts/run_agent.sh"],
+        environment=agent_container_environment(),
+        execution_timeout=timedelta(hours=4),
+        retries=2,
+        retry_delay=timedelta(minutes=3),
+        **docker_kwargs,
+    )
+
+    run_eval_docker = PipelineDockerOperator(
+        task_id="run_eval",
+        command=["bash", "scripts/run_eval.sh"],
+        environment=eval_container_environment(),
+        execution_timeout=timedelta(hours=4),
+        retries=1,
+        retry_delay=timedelta(minutes=3),
+        **docker_kwargs,
+    )
+
     cfg = prepare_run()
-    preds = run_agent(cfg)
-    eval_out = run_eval(cfg, preds)
-    finalized = finalize_run_task(cfg, eval_out)
+    agent_checked = verify_agent(cfg)
+    eval_checked = verify_eval(cfg)
+    finalized = finalize_run_task(cfg, eval_checked)
     uploaded = upload_artifacts(finalized)
-    summarize_and_log(finalized, uploaded)
+    summarize = summarize_and_log(finalized, uploaded)
+
+    cfg >> run_agent_docker >> agent_checked >> run_eval_docker >> eval_checked >> finalized >> uploaded >> summarize
 
 
 evaluate_agent_dag()
