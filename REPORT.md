@@ -198,7 +198,7 @@ To re-evaluate or extend an existing folder without generating a new id, trigger
 |------|-------------|
 | [screenshots/airflow_dag.png](screenshots/airflow_dag.png) | Graph view — green run, `PipelineDockerOperator` on `run_agent` / `run_eval` |
 | [screenshots/mlflow_runs.png](screenshots/mlflow_runs.png) | MLflow experiment `evaluate_agent`, run `20260704T004726Z-7ea9eb` |
-| [screenshots/object_storage_artifacts.png](screenshots/object_storage_artifacts.png) | `aws s3 ls` output — 13 objects under `s3://mlops-runs/runs/20260704T004726Z-7ea9eb/` |
+| [screenshots/object_storage_artifacts.png](screenshots/object_storage_artifacts.png) | MinIO Object Browser — bucket `mlops-runs`, prefix `runs/20260704T004726Z-7ea9eb/` |
 
 ---
 
